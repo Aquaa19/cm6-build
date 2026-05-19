@@ -6,7 +6,7 @@ export default {
   output: [
     {
       // Outputs directly to the React Native Android assets directory
-      file: '../Nova-Code/android/app/src/main/assets/editor/editor.bundle.js',
+      file: '../nova-code/android/app/src/main/assets/editor/editor.bundle.js',
       format: 'iife',
       name: 'CMEditor'
     }
