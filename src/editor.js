@@ -1,7 +1,7 @@
 // cm6-build/src/editor.js
 
-import { EditorState, Compartment } from "@codemirror/state";
-import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection, dropCursor } from "@codemirror/view";
+import { EditorState, Compartment, StateEffect, StateField } from "@codemirror/state";
+import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection, dropCursor, Decoration } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, cursorCharLeft, cursorCharRight, cursorLineUp, cursorLineDown, undo, redo, toggleComment } from "@codemirror/commands";
 import { syntaxHighlighting, defaultHighlightStyle, indentOnInput, bracketMatching, foldGutter, foldKeymap } from "@codemirror/language";
 import { search, searchKeymap, highlightSelectionMatches, SearchQuery, setSearchQuery, findNext, findPrevious, replaceNext, replaceAll, SearchCursor, getSearchQuery } from "@codemirror/search";
@@ -29,6 +29,33 @@ const lineWrappingConf = new Compartment();
 const tabSizeConf = new Compartment();
 const themeConf = new Compartment();
 const lineNumbersConf = new Compartment();
+
+// Error Line State Management
+const setErrorLineEffect = StateEffect.define();
+const clearErrorLineEffect = StateEffect.define();
+
+const errorLineDecoration = Decoration.line({
+  attributes: { class: "cm-error-line" }
+});
+
+const errorLineField = StateField.define({
+  create() { return Decoration.none; },
+  update(decorations, tr) {
+    decorations = decorations.map(tr.changes);
+    for (let effect of tr.effects) {
+      if (effect.is(setErrorLineEffect)) {
+        try {
+          const line = tr.state.doc.line(effect.value);
+          decorations = Decoration.set([errorLineDecoration.range(line.from)]);
+        } catch(e) { console.error("Error setting line decoration:", e); }
+      } else if (effect.is(clearErrorLineEffect)) {
+        decorations = Decoration.none;
+      }
+    }
+    return decorations;
+  },
+  provide: f => EditorView.decorations.from(f)
+});
 
 const LANGUAGE_MAP = {
   javascript: javascript(),
@@ -97,7 +124,13 @@ function initEditor(content, language, fontSize, theme, wordWrap, showLineNumber
       autocompletion(),
       highlightActiveLine(),
       highlightSelectionMatches(),
-      search({ top: true }), // Enable Search Extension
+      search({ top: true }),
+      errorLineField, // Inject Error Decoration Field
+
+      // Inject Error Class Theme
+      EditorView.theme({
+        ".cm-error-line": { backgroundColor: "rgba(255, 107, 107, 0.15)" }
+      }),
 
       // Dynamic Compartments
       themeConf.of(theme === 'light' ? [] : oneDark),
@@ -130,7 +163,6 @@ function initEditor(content, language, fontSize, theme, wordWrap, showLineNumber
             const docLine = update.state.doc.lineAt(pos);
             sendToRN({ type: "CURSOR_CHANGED", payload: { line: docLine.number, col: pos - docLine.from + 1 } });
           }
-          // Debounce / Check if search query exists to report index changes when cursor moves
           if (getSearchQuery(view.state)?.valid) {
              reportSearchResults();
           }
@@ -259,6 +291,26 @@ window.addEventListener("message", (event) => {
         break;
       case "TOGGLE_COMMENT":
         if (view) toggleComment(view);
+        break;
+
+      // Error Line Highlights
+      case "SET_ERROR_LINE":
+        if (view) {
+          try {
+            const line = message.payload.line;
+            view.dispatch({ effects: setErrorLineEffect.of(line) });
+            // Optionally, scroll into view
+            const docLine = view.state.doc.line(line);
+            view.dispatch({ selection: { anchor: docLine.from, head: docLine.from }, scrollIntoView: true });
+          } catch (e) {
+            console.error("Invalid line for error highlight", e);
+          }
+        }
+        break;
+      case "CLEAR_ERROR_LINE":
+        if (view) {
+          view.dispatch({ effects: clearErrorLineEffect.of(null) });
+        }
         break;
     }
   } catch (err) {
