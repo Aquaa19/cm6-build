@@ -3,7 +3,8 @@
 import { EditorState, Compartment, StateEffect, StateField } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection, dropCursor, Decoration } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, cursorCharLeft, cursorCharRight, cursorLineUp, cursorLineDown, undo, redo, toggleComment } from "@codemirror/commands";
-import { syntaxHighlighting, defaultHighlightStyle, indentOnInput, bracketMatching, foldGutter, foldKeymap } from "@codemirror/language";
+import { syntaxHighlighting, HighlightStyle, indentOnInput, bracketMatching, foldGutter, foldKeymap } from "@codemirror/language";
+import { tags as t } from "@lezer/highlight";
 import { search, searchKeymap, highlightSelectionMatches, SearchQuery, setSearchQuery, findNext, findPrevious, replaceNext, replaceAll, SearchCursor, getSearchQuery } from "@codemirror/search";
 import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
 import { lintKeymap } from "@codemirror/lint";
@@ -29,6 +30,60 @@ const lineWrappingConf = new Compartment();
 const tabSizeConf = new Compartment();
 const themeConf = new Compartment();
 const lineNumbersConf = new Compartment();
+const highlightConf = new Compartment();
+
+// Rich Syntax Highlight Custom Styles (VS Code style colors)
+const customDarkHighlightStyle = HighlightStyle.define([
+  { tag: t.keyword, color: "#c678dd", fontWeight: "bold" },
+  { tag: [t.name, t.deleted, t.character, t.macroName], color: "#abb2bf" },
+  { tag: [t.propertyName], color: "#abb2bf" },
+  { tag: [t.variableName], color: "#e06c75" },
+  { tag: [t.function(t.variableName), t.function(t.propertyName), t.labelName], color: "#61afef" },
+  { tag: [t.color, t.constant(t.name), t.standard(t.name)], color: "#d19a66" },
+  { tag: [t.definition(t.name), t.separator], color: "#abb2bf" },
+  { tag: [t.typeName, t.className, t.number, t.changed, t.annotation, t.modifier, t.self, t.namespace], color: "#e5c07b" },
+  { tag: [t.number, t.integer, t.float], color: "#d19a66" },
+  { tag: [t.bool, t.null], color: "#d19a66", fontWeight: "bold" },
+  { tag: [t.operator, t.operatorKeyword, t.url, t.escape, t.regexp, t.link, t.special(t.string)], color: "#56b6c2" },
+  { tag: [t.meta, t.comment], color: "#7f848e", fontStyle: "italic" },
+  { tag: t.strong, fontWeight: "bold" },
+  { tag: t.emphasis, fontStyle: "italic" },
+  { tag: t.strikethrough, textDecoration: "line-through" },
+  { tag: t.link, color: "#61afef", textDecoration: "underline" },
+  { tag: t.heading, fontWeight: "bold", color: "#61afef" },
+  { tag: [t.atom, t.bool, t.special(t.variableName)], color: "#d19a66" },
+  { tag: [t.processingInstruction, t.string, t.inserted], color: "#98c379" },
+  { tag: [t.tagName], color: "#e06c75" },
+  { tag: [t.attributeName], color: "#d19a66" },
+  { tag: [t.attributeValue], color: "#98c379" },
+  { tag: t.invalid, color: "#ffffff", backgroundColor: "#e06c75" }
+]);
+
+const customLightHighlightStyle = HighlightStyle.define([
+  { tag: t.keyword, color: "#a626a4", fontWeight: "bold" },
+  { tag: [t.name, t.deleted, t.character, t.macroName], color: "#383a42" },
+  { tag: [t.propertyName], color: "#383a42" },
+  { tag: [t.variableName], color: "#e45649" },
+  { tag: [t.function(t.variableName), t.function(t.propertyName), t.labelName], color: "#4078f2" },
+  { tag: [t.color, t.constant(t.name), t.standard(t.name)], color: "#986801" },
+  { tag: [t.definition(t.name), t.separator], color: "#383a42" },
+  { tag: [t.typeName, t.className, t.number, t.changed, t.annotation, t.modifier, t.self, t.namespace], color: "#c18401" },
+  { tag: [t.number, t.integer, t.float], color: "#986801" },
+  { tag: [t.bool, t.null], color: "#986801", fontWeight: "bold" },
+  { tag: [t.operator, t.operatorKeyword, t.url, t.escape, t.regexp, t.link, t.special(t.string)], color: "#0184bc" },
+  { tag: [t.meta, t.comment], color: "#a0a1a7", fontStyle: "italic" },
+  { tag: t.strong, fontWeight: "bold" },
+  { tag: t.emphasis, fontStyle: "italic" },
+  { tag: t.strikethrough, textDecoration: "line-through" },
+  { tag: t.link, color: "#4078f2", textDecoration: "underline" },
+  { tag: t.heading, fontWeight: "bold", color: "#4078f2" },
+  { tag: [t.atom, t.bool, t.special(t.variableName)], color: "#986801" },
+  { tag: [t.processingInstruction, t.string, t.inserted], color: "#50a14f" },
+  { tag: [t.tagName], color: "#e45649" },
+  { tag: [t.attributeName], color: "#986801" },
+  { tag: [t.attributeValue], color: "#50a14f" },
+  { tag: t.invalid, color: "#ffffff", backgroundColor: "#e45649" }
+]);
 
 // Error Line State Management
 const setErrorLineEffect = StateEffect.define();
@@ -118,7 +173,6 @@ function initEditor(content, language, fontSize, theme, wordWrap, showLineNumber
       dropCursor(),
       EditorState.allowMultipleSelections.of(true),
       indentOnInput(),
-      syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
       bracketMatching(),
       closeBrackets(),
       autocompletion(),
@@ -134,6 +188,7 @@ function initEditor(content, language, fontSize, theme, wordWrap, showLineNumber
 
       // Dynamic Compartments
       themeConf.of(theme === 'light' ? [] : oneDark),
+      highlightConf.of(theme === 'light' ? syntaxHighlighting(customLightHighlightStyle) : syntaxHighlighting(customDarkHighlightStyle)),
       lineNumbersConf.of(showLineNumbers ? lineNumbers() : []),
       languageConf.of(getLanguageExtension(language)),
       fontSizeConf.of(EditorView.theme({
@@ -233,7 +288,14 @@ window.addEventListener("message", (event) => {
         if (view) view.dispatch({ effects: tabSizeConf.reconfigure(EditorState.tabSize.of(message.payload.tabSize)) });
         break;
       case "SET_THEME":
-        if (view) view.dispatch({ effects: themeConf.reconfigure(message.payload.theme === 'light' ? [] : oneDark) });
+        if (view) {
+          view.dispatch({
+            effects: [
+              themeConf.reconfigure(message.payload.theme === 'light' ? [] : oneDark),
+              highlightConf.reconfigure(message.payload.theme === 'light' ? syntaxHighlighting(customLightHighlightStyle) : syntaxHighlighting(customDarkHighlightStyle))
+            ]
+          });
+        }
         break;
 
       // Search and Replace
